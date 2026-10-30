@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A/B Test Planner</title>
+<meta name="description" content="Plan, size and call A/B tests on revenue, not clicks. Flags sample ratio mismatch, early stopping and false winners.">
+<style>
+:root{
+  --bg:#f7f6f3;--panel:#ffffff;--ink:#1d1d1b;--muted:#6b6a66;--line:#e4e2dc;
+  --accent:#2f5d50;--accent-soft:#e3eee9;--good:#1f7a4d;--good-soft:#e2f3e9;
+  --bad:#b4352f;--bad-soft:#f9e6e4;--warn:#9a6a00;--warn-soft:#fbf1d9;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#151614;--panel:#1e201d;--ink:#ecebe6;--muted:#a3a29c;--line:#2f322d;
+  --accent:#8cc5ad;--accent-soft:#22332c;--good:#7dd3a3;--good-soft:#1c3328;
+  --bad:#f0938c;--bad-soft:#3a2321;--warn:#e9c46a;--warn-soft:#352d17;}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:32px 16px 64px}
+header h1{font-size:1.9rem;margin:0 0 6px;letter-spacing:-.01em}
+header p{margin:0;color:var(--muted);max-width:680px}
+.tabs{display:flex;gap:6px;margin:28px 0 16px;flex-wrap:wrap}
+.tabs button{border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:9px 16px;border-radius:999px;font:inherit;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+label{display:block;font-size:.85rem;color:var(--muted);margin-bottom:4px}
+input,select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+.hint{font-size:.78rem;color:var(--muted);margin-top:3px}
+h2{font-size:1.15rem;margin:0 0 14px}
+h3{font-size:.95rem;margin:22px 0 10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:18px}
+.stat{border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.stat .k{font-size:.78rem;color:var(--muted)}
+.stat .v{font-size:1.45rem;font-weight:650;font-variant-numeric:tabular-nums}
+.stat .s{font-size:.8rem;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:.92rem}
+th,td{text-align:right;padding:8px 10px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--muted);font-weight:600;font-size:.8rem}
+.arms td input{text-align:right}
+.verdict{margin-top:20px;border-radius:12px;padding:16px 18px;border:1px solid}
+.verdict.good{background:var(--good-soft);border-color:var(--good);color:var(--ink)}
+.verdict.bad{background:var(--bad-soft);border-color:var(--bad)}
+.verdict.warn{background:var(--warn-soft);border-color:var(--warn)}
+.verdict.neutral{background:var(--accent-soft);border-color:var(--accent)}
+.verdict strong{display:block;font-size:1.05rem;margin-bottom:4px}
+.flags{list-style:none;padding:0;margin:14px 0 0}
+.flags li{padding:8px 0 8px 26px;position:relative;border-top:1px solid var(--line);font-size:.93rem}
+.flags li::before{position:absolute;left:0;top:8px;font-weight:700}
+.flags li.ok::before{content:"✓";color:var(--good)}
+.flags li.fail::before{content:"!";color:var(--bad)}
+.flags li.caution::before{content:"~";color:var(--warn)}
+.pos{color:var(--good)}.neg{color:var(--bad)}
+.btn{border:0;background:var(--accent);color:var(--bg);padding:9px 16px;border-radius:8px;font:inherit;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.scroll{overflow-x:auto}
+footer{margin-top:28px;color:var(--muted);font-size:.85rem}
+footer a{color:var(--accent)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>A/B Test Planner</h1>
+  <p>Plan tests that can actually detect the change you care about, then call them on <strong>revenue</strong>, not clicks. Built-in checks for sample ratio mismatch, early stopping and false winners.</p>
+</header>
+
+<div class="tabs" role="tablist">
+  <button role="tab" aria-selected="true" data-tab="plan">1 · Plan a test</button>
+  <button role="tab" aria-selected="false" data-tab="analyse">2 · Analyse a result</button>
+  <button role="tab" aria-selected="false" data-tab="method">How it works</button>
+</div>
+
+<!-- PLAN -->
+<section class="panel" id="tab-plan">
+  <h2>How big, and how long?</h2>
+  <div class="grid">
+    <div><label for="p_base">Baseline conversion rate (%)</label><input id="p_base" type="number" step="0.01" value="3.0"><div class="hint">Current orders ÷ visitors</div></div>
+    <div><label for="p_mde">Smallest uplift worth detecting (% relative)</label><input id="p_mde" type="number" step="0.5" value="5"><div class="hint">e.g. 5 = 3.00% → 3.15%</div></div>
+    <div><label for="p_traffic">Daily visitors entering the test</label><input id="p_traffic" type="number" value="20000"></div>
+    <div><label for="p_arms">Number of arms (incl. control)</label><input id="p_arms" type="number" min="2" max="8" value="2"></div>
+    <div><label for="p_alpha">Significance level (two-sided)</label><select id="p_alpha"><option value="0.10">90%</option><option value="0.05" selected>95%</option><option value="0.01">99%</option></select></div>
+    <div><label for="p_power">Power</label><select id="p_power"><option value="0.8" selected>80%</option><option value="0.9">90%</option></select></div>
+    <div><label for="p_aov">Average order value (£, optional)</label><input id="p_aov" type="number" step="0.01" value="60"><div class="hint">Used to value the uplift</div></div>
+  </div>
+  <div class="stats" id="planOut"></div>
+  <ul class="flags" id="planFlags"></ul>
+</section>
+
+<!-- ANALYSE -->
+<section class="panel" id="tab-analyse" hidden>
+  <h2>Did it win, and on what?</h2>
+  <div class="grid">
+    <div><label for="a_alpha">Significance level</label><select id="a_alpha"><option value="0.10">90%</option><option value="0.05" selected>95%</option><option value="0.01">99%</option></select></div>
+    <div><label for="a_planned">Planned visitors per arm (from step 1)</label><input id="a_planned" type="number" value=""><div class="hint">Leave blank to skip the early-stopping check</div></div>
+    <div><label for="a_primary">Primary decision metric</label><select id="a_primary"><option value="rpv" selected>Revenue per visitor</option><option value="cr">Conversion rate</option></select></div>
+  </div>
+  <h3>Results by arm</h3>
+  <div class="scroll">
+  <table class="arms">
+    <thead><tr><th>Arm</th><th>Visitors</th><th>Orders</th><th>Revenue (£)</th><th>Revenue SD per visitor (£)<br><span style="font-weight:400">optional</span></th></tr></thead>
+    <tbody id="armRows"></tbody>
+  </table>
+  </div>
+  <div class="row">
+    <button class="btn ghost" id="addArm">+ Add variant</button>
+    <button class="btn ghost" id="exWin">Example: real winner</button>
+    <button class="btn ghost" id="exFalse">Example: false winner</button>
+    <button class="btn ghost" id="exSrm">Example: broken split</button>
+  </div>
+  <h3>Readout</h3>
+  <div class="scroll"><table id="readout"></table></div>
+  <div id="verdict"></div>
+  <ul class="flags" id="checks"></ul>
+</section>
+
+<!-- METHOD -->
+<section class="panel" id="tab-method" hidden>
+  <h2>How it works</h2>
+  <p><strong>Sample size</strong> uses the standard two-proportion formula for a two-sided test at the chosen significance and power. With more than two arms, the significance level is split across comparisons against control (Bonferroni), so each variant needs more traffic. Duration is rounded up to whole weeks so every day of the week is represented equally.</p>
+  <p><strong>Conversion rate</strong> is compared with a two-proportion z-test. <strong>Revenue per visitor</strong> is compared with a Welch z-test, using the revenue standard deviation per visitor if you supply it, or a conservative estimate if you don't. Both report the relative uplift with a confidence interval.</p>
+  <p><strong>Sample ratio mismatch</strong> is a chi-square test of observed visitors against the intended even split. At p &lt; 0.001 the assignment is probably broken (bots, redirects, caching or tracking issues), and no result from the test should be trusted.</p>
+  <p><strong>Early stopping:</strong> checking a test daily and stopping the first time it looks significant inflates false positives well above the nominal rate. If an arm hasn't reached its planned sample, the tool won't call a winner.</p>
+  <p><strong>False winners:</strong> a variant can raise conversion while lowering order value, or raise engagement while lowering revenue. When conversion and revenue disagree, the tool says so and decides on the primary metric you chose, which should usually be revenue.</p>
+  <p>All calculations run in your browser. Nothing is sent anywhere.</p>
+</section>
+
+<footer>Built by <a href="https://github.com/CDKennedy247">Chris Kennedy</a> · large-sample normal approximations · MIT licence</footer>
+</div>
+
+<script>
+// ---------- stats helpers ----------
+function erf(x){const s=Math.sign(x);x=Math.abs(x);const t=1/(1+0.3275911*x);
+  const y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x);return s*y;}
+const Phi=z=>0.5*(1+erf(z/Math.SQRT2));
+function invPhi(p){ // Acklam
+  const a=[-3.969683028665376e+01,2.209460984245205e+02,-2.759285104469687e+02,1.383577518672690e+02,-3.066479806614716e+01,2.506628277459239e+00],
+  b=[-5.447609879822406e+01,1.615858368580409e+02,-1.556989798598866e+02,6.680131188771972e+01,-1.328068155288572e+01],
+  c=[-7.784894002430293e-03,-3.223964580411365e-01,-2.400758277161838e+00,-2.549732539343734e+00,4.374664141464968e+00,2.938163982698783e+00],
+  d=[7.784695709041462e-03,3.224671290700398e-01,2.445134137142996e+00,3.754408661907416e+00],pl=0.02425;
+  let q,r;
+  if(p<pl){q=Math.sqrt(-2*Math.log(p));return(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);}
+  if(p>1-pl){q=Math.sqrt(-2*Math.log(1-p));return-(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);}
+  q=p-0.5;r=q*q;return(((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q/(((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);}
+// chi-square upper tail via Wilson–Hilferty
+function chiSqP(x,k){if(x<=0)return 1;const z=(Math.cbrt(x/k)-(1-2/(9*k)))/Math.sqrt(2/(9*k));return 1-Phi(z);}
+
+const fmt=(n,d=0)=>Number.isFinite(n)?n.toLocaleString('en-GB',{minimumFractionDigits:d,maximumFractionDigits:d}):'–';
+const pct=(n,d=2)=>Number.isFinite(n)?(n*100).toFixed(d)+'%':'–';
+const sgn=(n,d=2)=>Number.isFinite(n)?((n>0?'+':'')+(n*100).toFixed(d)+'%'):'–';
+const pfmt=p=>!Number.isFinite(p)?'–':p<0.0001?'<0.0001':p.toFixed(4);
+const $=id=>document.getElementById(id);
+const num=id=>parseFloat($(id).value);
+
+// ---------- tabs ----------
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.setAttribute('aria-selected',x===b));
+  ['plan','analyse','method'].forEach(t=>$('tab-'+t).hidden=(t!==b.dataset.tab));});
+
+// ---------- plan ----------
+function plan(){
+  const p1=num('p_base')/100, mde=num('p_mde')/100, traffic=num('p_traffic'),
+        arms=Math.max(2,Math.round(num('p_arms'))), alpha=parseFloat($('p_alpha').value),
+        power=parseFloat($('p_power').value), aov=num('p_aov');
+  const out=$('planOut'), flags=$('planFlags');
+  if(!(p1>0&&p1<1&&mde>0&&traffic>0)){out.innerHTML='';flags.innerHTML='<li class="caution">Enter a baseline between 0 and 100%, a positive uplift and daily traffic.</li>';return;}
+  const comps=arms-1, a=alpha/comps;
+  const p2=p1*(1+mde), pbar=(p1+p2)/2, za=invPhi(1-a/2), zb=invPhi(power);
+  const n=Math.ceil(Math.pow(za*Math.sqrt(2*pbar*(1-pbar))+zb*Math.sqrt(p1*(1-p1)+p2*(1-p2)),2)/Math.pow(p2-p1,2));
+  const total=n*arms, days=total/traffic, weeks=Math.max(1,Math.ceil(days/7));
+  const extraOrdersDay=traffic*(p2-p1), valueWk=Number.isFinite(aov)?extraOrdersDay*7*aov:NaN;
+  out.innerHTML=`
+   <div class="stat"><div class="k">Visitors per arm</div><div class="v">${fmt(n)}</div><div class="s">${fmt(total)} in total</div></div>
+   <div class="stat"><div class="k">Run for</div><div class="v">${weeks} week${weeks>1?'s':''}</div><div class="s">${fmt(days,1)} days of traffic, rounded up to whole weeks</div></div>
+   <div class="stat"><div class="k">Detects</div><div class="v">${pct(p1)} → ${pct(p2)}</div><div class="s">${sgn(mde,1)} relative at ${Math.round((1-alpha)*100)}% / ${Math.round(power*100)}% power</div></div>
+   <div class="stat"><div class="k">Worth, if real</div><div class="v">${Number.isFinite(valueWk)?'£'+fmt(valueWk*52/4):'–'}</div><div class="s">per quarter at full traffic</div></div>`;
+  $('a_planned').value=n;
+  const f=[];
+  if(comps>1)f.push(`<li class="caution">${arms} arms: significance split across ${comps} comparisons (each tested at ${(a*100).toFixed(2)}%), so each arm needs more traffic. Fewer variants = faster answers.</li>`);
+  f.push(weeks>6?`<li class="fail">${weeks} weeks is long: results drift with seasonality and cookie churn. Test a bolder change, raise the uplift you need to detect, or pick a page with more traffic.</li>`
+              :`<li class="ok">Duration is practical. Commit to the full ${weeks} week${weeks>1?'s':''} before looking for a winner.</li>`);
+  if(days<7)f.push(`<li class="caution">You'd hit the sample in under a week. Run a full week anyway so weekday and weekend behaviour are both represented.</li>`);
+  f.push(`<li class="ok">Decide the primary metric now (ideally revenue per visitor) and write it down before launch.</li>`);
+  flags.innerHTML=f.join('');
+}
+['p_base','p_mde','p_traffic','p_arms','p_alpha','p_power','p_aov'].forEach(id=>$(id).addEventListener('input',plan));
+plan();
+
+// ---------- analyse ----------
+let arms=[];
+function rowHTML(a,i){return `<tr>
+  <td>${i===0?'Control':'Variant '+String.fromCharCode(64+i)}${i>1?` <button class="btn ghost" style="padding:2px 8px;font-size:.75rem" data-del="${i}">×</button>`:''}</td>
+  <td><input data-i="${i}" data-k="v" type="number" value="${a.v??''}"></td>
+  <td><input data-i="${i}" data-k="o" type="number" value="${a.o??''}"></td>
+  <td><input data-i="${i}" data-k="r" type="number" step="0.01" value="${a.r??''}"></td>
+  <td><input data-i="${i}" data-k="sd" type="number" step="0.01" value="${a.sd??''}" placeholder="auto"></td></tr>`;}
+function renderArms(){
+  $('armRows').innerHTML=arms.map(rowHTML).join('');
+  $('armRows').querySelectorAll('input').forEach(el=>el.oninput=()=>{const v=parseFloat(el.value);arms[el.dataset.i][el.dataset.k]=Number.isFinite(v)?v:undefined;analyse();});
+  $('armRows').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{arms.splice(+b.dataset.del,1);renderArms();});
+  analyse();}
+function setExample(x){arms=x.map(a=>({...a}));renderArms();}
+$('addArm').onclick=()=>{if(arms.length<8){arms.push({});renderArms();}};
+$('exWin').onclick=()=>{$('a_planned').value=41500;setExample([{v:42150,o:1265,r:75900},{v:41980,o:1392,r:84910}]);};
+$('exFalse').onclick=()=>{$('a_planned').value=41500;setExample([{v:42210,o:1266,r:75960},{v:42040,o:1388,r:73720}]);};
+$('exSrm').onclick=()=>{$('a_planned').value=41500;setExample([{v:44800,o:1344,r:80640},{v:39300,o:1300,r:78000}]);};
+['a_alpha','a_planned','a_primary'].forEach(id=>$(id).addEventListener('input',analyse));
+
+function rpvSD(a){ // supplied SD, else conservative estimate assuming order values have CV of 1
+  if(Number.isFinite(a.sd)&&a.sd>0)return a.sd;
+  const p=a.o/a.v, aov=a.r/a.o; return Math.sqrt(p*(2*aov*aov)-Math.pow(p*aov,2));}
+
+function analyse(){
+  const alpha=parseFloat($('a_alpha').value), primary=$('a_primary').value, planned=num('a_planned');
+  const valid=arms.length>=2&&arms.every(a=>a.v>0&&a.o>=0&&a.o<=a.v&&a.r>=0);
+  if(!valid){$('readout').innerHTML='';$('verdict').innerHTML='<div class="verdict neutral"><strong>Enter results</strong>Visitors, orders and revenue for each arm, or load an example.</div>';$('checks').innerHTML='';return;}
+  const comps=arms.length-1, a=alpha/comps, z=invPhi(1-a/2), c=arms[0];
+  const cCR=c.o/c.v, cRPV=c.r/c.v, cSD=rpvSD(c);
+  const res=arms.slice(1).map((v,i)=>{
+    const cr=v.o/v.v, pooled=(c.o+v.o)/(c.v+v.v);
+    const zCR=(cr-cCR)/Math.sqrt(pooled*(1-pooled)*(1/c.v+1/v.v)), pCR=2*(1-Phi(Math.abs(zCR)));
+    const seCR=Math.sqrt(cCR*(1-cCR)/c.v+cr*(1-cr)/v.v);
+    const rpv=v.r/v.v, sd=rpvSD(v), seR=Math.sqrt(cSD*cSD/c.v+sd*sd/v.v);
+    const zR=(rpv-cRPV)/seR, pR=2*(1-Phi(Math.abs(zR)));
+    return {name:'Variant '+String.fromCharCode(65+i),cr,rpv,aov:v.r/Math.max(v.o,1),
+      liftCR:cr/cCR-1,ciCR:[(cr-cCR-z*seCR)/cCR,(cr-cCR+z*seCR)/cCR],pCR,
+      liftR:rpv/cRPV-1,ciR:[(rpv-cRPV-z*seR)/cRPV,(rpv-cRPV+z*seR)/cRPV],pR,sigCR:pCR<a,sigR:pR<a,v};});
+  const cls=(s,l)=>s?(l>0?'pos':'neg'):'';
+  $('readout').innerHTML=`<thead><tr><th></th><th>Conv. rate</th><th>Uplift (CI)</th><th>p</th><th>Rev / visitor</th><th>Uplift (CI)</th><th>p</th><th>AOV</th></tr></thead><tbody>
+   <tr><td>Control</td><td>${pct(cCR)}</td><td>–</td><td>–</td><td>£${fmt(cRPV,3)}</td><td>–</td><td>–</td><td>£${fmt(c.r/Math.max(c.o,1),2)}</td></tr>
+   ${res.map(r=>`<tr><td>${r.name}</td><td>${pct(r.cr)}</td><td class="${cls(r.sigCR,r.liftCR)}">${sgn(r.liftCR,1)} <span style="color:var(--muted)">(${sgn(r.ciCR[0],1)} to ${sgn(r.ciCR[1],1)})</span></td><td>${pfmt(r.pCR)}</td>
+   <td>£${fmt(r.rpv,3)}</td><td class="${cls(r.sigR,r.liftR)}">${sgn(r.liftR,1)} <span style="color:var(--muted)">(${sgn(r.ciR[0],1)} to ${sgn(r.ciR[1],1)})</span></td><td>${pfmt(r.pR)}</td><td>£${fmt(r.aov,2)}</td></tr>`).join('')}</tbody>`;
+
+  // checks
+  const totalV=arms.reduce((s,x)=>s+x.v,0), exp=totalV/arms.length;
+  const chi=arms.reduce((s,x)=>s+Math.pow(x.v-exp,2)/exp,0), pSRM=chiSqP(chi,arms.length-1), srm=pSRM<0.001;
+  const minV=Math.min(...arms.map(x=>x.v)), early=Number.isFinite(planned)&&planned>0&&minV<planned;
+  const checks=[];
+  checks.push(srm?`<li class="fail"><b>Sample ratio mismatch</b> (p ${pfmt(pSRM)}). Traffic split is ${arms.map(x=>pct(x.v/totalV,1)).join(' / ')} against an intended even split. Assignment or tracking is broken; fix it and rerun.</li>`
+                 :`<li class="ok">Traffic split looks healthy (SRM p ${pfmt(pSRM)}).</li>`);
+  checks.push(early?`<li class="fail"><b>Stopped early.</b> The smallest arm has ${fmt(minV)} of ${fmt(planned)} planned visitors (${Math.round(minV/planned*100)}%). Calling it now inflates false positives.</li>`
+                   :Number.isFinite(planned)&&planned>0?`<li class="ok">Every arm reached its planned sample.</li>`:`<li class="caution">No planned sample entered, so early stopping can't be checked.</li>`);
+  if(comps>1)checks.push(`<li class="caution">${comps} comparisons: each tested at ${(a*100).toFixed(2)}% to keep the overall false-positive rate at ${alpha*100}%.</li>`);
+  const conflicts=res.filter(r=>(r.liftCR>0&&r.sigCR&&!(r.liftR>0&&r.sigR))||(r.liftR>0&&r.sigR&&!(r.liftCR>0&&r.sigCR))||(Math.sign(r.liftCR)!==Math.sign(r.liftR)&&(r.sigCR||r.sigR)));
+  conflicts.forEach(r=>checks.push(`<li class="caution"><b>${r.name}: conversion and revenue disagree.</b> Conversion ${sgn(r.liftCR,1)}, revenue per visitor ${sgn(r.liftR,1)}, average order value ${sgn(r.aov/(c.r/Math.max(c.o,1))-1,1)}. More orders is not the same as more money.</li>`));
+  if(!arms.some(x=>Number.isFinite(x.sd)))checks.push(`<li class="caution">Revenue SD not supplied, so a conservative estimate was used. Export revenue per visitor from your analytics for a sharper revenue result.</li>`);
+  $('checks').innerHTML=checks.join('');
+
+  // verdict
+  const key=primary==='rpv'?'R':'CR', mName=primary==='rpv'?'revenue per visitor':'conversion rate';
+  let v;
+  if(srm)v=['bad','Don\'t trust this test','The traffic split is broken, so every number above is suspect. Investigate assignment and tracking, then rerun.'];
+  else if(early)v=['warn','Too early to call','Keep the test running until every arm reaches its planned sample. Stopping when it first looks significant is how false winners get shipped.'];
+  else{
+    const winners=res.filter(r=>r['sig'+key]&&r['lift'+key]>0).sort((x,y)=>y['lift'+key]-x['lift'+key]);
+    const losers=res.filter(r=>r['sig'+key]&&r['lift'+key]<0);
+    if(winners.length){const w=winners[0], ci=w['ci'+key], other=primary==='rpv'?w.liftCR:w.liftR;
+      v=['good',`Ship ${w.name}`,`${sgn(w['lift'+key],1)} ${mName} (CI ${sgn(ci[0],1)} to ${sgn(ci[1],1)}). ${other<0?'Note: the secondary metric moved the other way; check that is acceptable.':'The secondary metric agrees.'} Plan for the real effect to be nearer the low end of the interval.`];}
+    else if(losers.length===res.length)v=['bad','Don\'t ship: the change costs money',`Every variant significantly reduced ${mName}. That's a valuable result: you've protected revenue by not rolling it out.`];
+    else{const fw=res.find(r=>primary==='rpv'&&r.sigCR&&r.liftCR>0);
+      v=fw?['warn','Possible false winner',`${fw.name} lifted conversion ${sgn(fw.liftCR,1)}, but revenue per visitor didn't significantly improve (${sgn(fw.liftR,1)}). Don't ship on conversion alone.`]
+          :['neutral','Inconclusive','No variant significantly moved '+mName+'. The true effect is likely smaller than this test could detect. Keep control, or retest a bolder change.'];}
+  }
+  $('verdict').innerHTML=`<div class="verdict ${v[0]}"><strong>${v[1]}</strong>${v[2]}</div>`;
+}
+$('exFalse').click();
+</script>
+</body>
+</html>
